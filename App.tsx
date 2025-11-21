@@ -65,47 +65,52 @@ function App() {
 
   // Initial Load & WebSocket Connection + Fallback de auto-refresh
 useEffect(() => {
-  // 1) Carga inicial completa (pedidos + empresa)
+  // 1) Carga inicial
   fetchData();
 
-  // 2) Suscripción por WebSocket (tiempo real "push")
+  // 2) Suscripción por WebSocket
   const unsubscribe = subscribeToUpdates(
     (newOrder) => {
-      console.log("WS NEW_ORDER recibido:", newOrder);
-      setOrders(prev => [newOrder, ...prev]);
+      setOrders(prev => {
+        const exists = prev.some(o => o.id === newOrder.id);
+        if (exists) {
+          return prev.map(o => (o.id === newOrder.id ? newOrder : o));
+        }
+        return [newOrder, ...prev];
+      });
       setLastUpdated(new Date());
     },
     (updatedOrder) => {
-      console.log("WS ORDER_UPDATE recibido:", updatedOrder);
-      setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      setOrders(prev =>
+        prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o))
+      );
       if (selectedOrder && selectedOrder.id === updatedOrder.id) {
         setSelectedOrder(updatedOrder);
       }
       setLastUpdated(new Date());
     },
     (updatedEmpresa) => {
-      console.log("WS EMPRESA_UPDATE recibido:", updatedEmpresa);
       setEmpresa(updatedEmpresa);
     }
   );
 
-  // 3) Fallback: polling cada 5 segundos
+  // 3) Fallback: auto-refresh cada 5s
   const intervalId = window.setInterval(async () => {
     try {
       const ordersData = await getOrders();
-      setOrders(ordersData);
+      setOrders(ordersData);        // 👈 reemplaza todo
       setLastUpdated(new Date());
     } catch (err) {
       console.error("Error en auto-actualización de pedidos:", err);
     }
-  }, 5000); // 5000 ms = 5 segundos
+  }, 5000);
 
-  // Limpieza al desmontar
   return () => {
     unsubscribe();
     clearInterval(intervalId);
   };
-}, [fetchData, selectedOrder]);
+}, [fetchData]);   // 👈 sin selectedOrder
+
 
   // Handle Status Change
   const handleStatusChange = async (orderId: number, newStatus: OrderStatus) => {
