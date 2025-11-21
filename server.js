@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const cors = require('cors');
 const http = require('http');
 const WebSocket = require('ws');
+const path = require('path');
 
 // --- CONFIGURACIÓN DE LA BASE DE DATOS (RENDER) ---
 // Usamos las credenciales exactas proporcionadas
@@ -30,6 +31,11 @@ const wss = new WebSocket.Server({ server });
 app.use(cors());
 app.use(express.json());
 
+// --- SERVIR FRONTEND REACT (Para Producción) ---
+// Servir archivos estáticos desde la carpeta 'build' (o 'dist' dependiendo de tu bundler)
+// Asumiremos 'build' que es el estándar de create-react-app, si usas Vite suele ser 'dist'.
+app.use(express.static(path.join(__dirname, 'build')));
+
 // --- VERIFICACIÓN DE CONEXIÓN AL INICIAR ---
 async function testDbConnection() {
   try {
@@ -45,18 +51,12 @@ async function testDbConnection() {
   } catch (err) {
     console.error('❌ ERROR FATAL: No se pudo conectar a la Base de Datos.');
     console.error('Detalle:', err.message);
-    console.error('Verifica tu internet y que las credenciales sean correctas.');
   }
 }
 
 testDbConnection();
 
 // --- API ENDPOINTS ---
-
-// Endpoint raíz para probar si el servidor corre en el navegador
-app.get('/', (req, res) => {
-  res.send('Servidor de Taquería Don Juan está ACTIVO y CORRIENDO 🚀');
-});
 
 // Endpoint de salud
 app.get('/api/health', (req, res) => {
@@ -70,7 +70,6 @@ app.get('/api/empresa', async (req, res) => {
     if (result.rows.length > 0) {
       res.json(result.rows[0]);
     } else {
-      // Si no existe, devolvemos un objeto vacío seguro
       res.json({ disponible: true, motivo_no_dispon: '' }); 
     }
   } catch (err) {
@@ -83,7 +82,6 @@ app.get('/api/empresa', async (req, res) => {
 app.post('/api/empresa/disponibilidad', async (req, res) => {
   const { disponible, motivo } = req.body;
   try {
-    // Actualizamos el primer registro que encontremos (asumiendo solo una empresa)
     const result = await pool.query(
       'UPDATE empresa SET disponible = $1, motivo_no_dispon = $2 WHERE id = (SELECT id FROM empresa LIMIT 1) RETURNING *',
       [disponible, motivo]
@@ -91,7 +89,6 @@ app.post('/api/empresa/disponibilidad', async (req, res) => {
     
     if (result.rows.length > 0) {
       const updatedEmpresa = result.rows[0];
-      // Avisar a todos los dashboards conectados
       broadcast({ type: 'EMPRESA_UPDATE', data: updatedEmpresa });
       res.json(updatedEmpresa);
     } else {
@@ -106,12 +103,9 @@ app.post('/api/empresa/disponibilidad', async (req, res) => {
 // 3. Obtener pedidos (con items)
 app.get('/api/orders', async (req, res) => {
   try {
-    // Pedidos recientes primero
     const pedidosResult = await pool.query('SELECT * FROM pedidos ORDER BY fecha_hora DESC LIMIT 50');
     const pedidos = pedidosResult.rows;
 
-    // Cargar items para cada pedido
-    // Nota: Esto podría optimizarse con un JOIN, pero por claridad lo hacemos así
     for (let pedido of pedidos) {
       const itemsResult = await pool.query(`
         SELECT pi.*, mi.nombre as nombre_producto, mi.categoria 
@@ -145,7 +139,6 @@ app.post('/api/orders/:id/status', async (req, res) => {
     
     const updatedOrder = result.rows[0];
     
-    // Necesitamos los items para enviar la actualización completa por WebSocket
     const itemsResult = await pool.query(`
         SELECT pi.*, mi.nombre as nombre_producto, mi.categoria 
         FROM pedido_items pi 
@@ -154,7 +147,6 @@ app.post('/api/orders/:id/status', async (req, res) => {
     `, [id]);
     updatedOrder.items = itemsResult.rows;
 
-    // Notificar actualización en tiempo real
     broadcast({ type: 'ORDER_UPDATE', data: updatedOrder });
 
     res.json(updatedOrder);
@@ -162,6 +154,12 @@ app.post('/api/orders/:id/status', async (req, res) => {
     console.error("Error cambiando estado:", err.message);
     res.status(500).json({ error: 'Error actualizando estado' });
   }
+});
+
+// --- CATCH-ALL ROUTE (IMPORTANTE PARA REACT ROUTER) ---
+// Cualquier petición que no sea API, devuelve el index.html de React
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'build', 'index.html'));
 });
 
 // --- LÓGICA WEBSOCKET (Tiempo Real) ---
@@ -174,13 +172,12 @@ function broadcast(message) {
   });
 }
 
-// Polling inteligente para detectar nuevos pedidos insertados por n8n/ElevenLabs
+// Polling inteligente
 let lastMaxId = 0;
 let isFirstRun = true;
 
 async function checkNewOrders() {
   try {
-    // Obtenemos el ID más alto actual
     const res = await pool.query('SELECT MAX(id) as max_id FROM pedidos');
     const currentMaxId = res.rows[0].max_id;
 
@@ -190,12 +187,10 @@ async function checkNewOrders() {
       return;
     }
 
-    // Si hay IDs nuevos mayores al último conocido
     if (currentMaxId > lastMaxId) {
       const newOrdersRes = await pool.query('SELECT * FROM pedidos WHERE id > $1 ORDER BY id ASC', [lastMaxId]);
       
       for (let order of newOrdersRes.rows) {
-        // Obtener items
         const itemsResult = await pool.query(`
           SELECT pi.*, mi.nombre as nombre_producto, mi.categoria 
           FROM pedido_items pi 
@@ -210,15 +205,13 @@ async function checkNewOrders() {
       lastMaxId = currentMaxId;
     }
   } catch (err) {
-    // Ignorar errores de conexión transitorios para no llenar la consola
+    // Ignorar errores transitorios
   }
 }
 
-// Revisar base de datos cada 5 segundos
 setInterval(checkNewOrders, 5000);
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001; // IMPORTANTE: Usar process.env.PORT en Render
 server.listen(PORT, () => {
-  console.log(`🚀 SERVIDOR INTERMEDIO CORRIENDO EN http://localhost:${PORT}`);
-  console.log(`📡 WebSockets activos en ws://localhost:${PORT}`);
+  console.log(`🚀 SERVIDOR INTERMEDIO CORRIENDO EN PUERTO ${PORT}`);
 });
