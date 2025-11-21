@@ -63,31 +63,49 @@ function App() {
     }
   }, [error, fetchData]);
 
-  // Initial Load & WebSocket Connection
-  useEffect(() => {
-    fetchData();
-    
-    const unsubscribe = subscribeToUpdates(
-      (newOrder) => {
-        setOrders(prev => [newOrder, ...prev]);
-        setLastUpdated(new Date());
-      },
-      (updatedOrder) => {
-        setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
-        if (selectedOrder && selectedOrder.id === updatedOrder.id) {
-          setSelectedOrder(updatedOrder);
-        }
-        setLastUpdated(new Date());
-      },
-      (updatedEmpresa) => {
-        setEmpresa(updatedEmpresa);
+  // Initial Load & WebSocket Connection + Fallback de auto-refresh
+useEffect(() => {
+  // 1) Carga inicial completa (pedidos + empresa)
+  fetchData();
+
+  // 2) Suscripción por WebSocket (tiempo real "push")
+  const unsubscribe = subscribeToUpdates(
+    (newOrder) => {
+      console.log("WS NEW_ORDER recibido:", newOrder);
+      setOrders(prev => [newOrder, ...prev]);
+      setLastUpdated(new Date());
+    },
+    (updatedOrder) => {
+      console.log("WS ORDER_UPDATE recibido:", updatedOrder);
+      setOrders(prev => prev.map(o => o.id === updatedOrder.id ? updatedOrder : o));
+      if (selectedOrder && selectedOrder.id === updatedOrder.id) {
+        setSelectedOrder(updatedOrder);
       }
-    );
-    
-    return () => {
-      unsubscribe();
-    };
-  }, [fetchData, selectedOrder]);
+      setLastUpdated(new Date());
+    },
+    (updatedEmpresa) => {
+      console.log("WS EMPRESA_UPDATE recibido:", updatedEmpresa);
+      setEmpresa(updatedEmpresa);
+    }
+  );
+
+  // 3) Fallback: polling cada 5 segundos
+  const intervalId = window.setInterval(async () => {
+    try {
+      const ordersData = await getOrders();
+      setOrders(ordersData);
+      setLastUpdated(new Date());
+    } catch (err) {
+      console.error("Error en auto-actualización de pedidos:", err);
+    }
+  }, 5000); // 5000 ms = 5 segundos
+
+  // Limpieza al desmontar
+  return () => {
+    unsubscribe();
+    clearInterval(intervalId);
+  };
+}, [fetchData, selectedOrder]);
 
   // Handle Status Change
   const handleStatusChange = async (orderId: number, newStatus: OrderStatus) => {
