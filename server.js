@@ -37,7 +37,6 @@ app.use(cors());
 app.use(express.json());
 
 // --- SERVIR FRONTEND REACT (Para Producción) ---
-// Vite genera la carpeta 'dist' por defecto
 app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- VERIFICACIÓN DE CONEXIÓN AL INICIAR ---
@@ -61,35 +60,97 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'online', db: 'connected' });
 });
 
+/**
+ * 🔹 OBTENER INFO DE LA EMPRESA
+ *  - Mapea motivo_no_disponible -> motivoNoDisponible para que el frontend lo entienda
+ */
 app.get('/api/empresa', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM empresa LIMIT 1');
+    const result = await pool.query(`
+      SELECT
+        id,
+        nombre,
+        correo,
+        telefono,
+        direccion,
+        horario,
+        info_general,
+        disponible,
+        motivo_no_disponible AS "motivoNoDisponible"
+      FROM empresa
+      ORDER BY id
+      LIMIT 1
+    `);
+
     if (result.rows.length > 0) {
       res.json(result.rows[0]);
     } else {
-      res.json({ disponible: true, motivo_no_dispon: '' }); 
+      // fallback si aún no hay registro
+      res.json({
+        id: 1,
+        nombre: 'Taquería Don Juan',
+        correo: null,
+        telefono: null,
+        direccion: null,
+        horario: null,
+        info_general: null,
+        disponible: true,
+        motivoNoDisponible: null
+      });
     }
   } catch (err) {
     console.error("Error en /api/empresa:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Error obteniendo información de empresa' });
   }
 });
 
+/**
+ * 🔹 ACTUALIZAR DISPONIBILIDAD
+ *  - Body esperado: { disponible: boolean, motivoNoDisponible?: string | null }
+ *  - Actualiza la columna motivo_no_disponible
+ *  - Devuelve los campos ya mapeados al formato del frontend
+ */
 app.post('/api/empresa/disponibilidad', async (req, res) => {
-  const { disponible, motivo } = req.body;
   try {
-    const result = await pool.query(
-      'UPDATE empresa SET disponible = $1, motivo_no_dispon = $2 WHERE id = (SELECT id FROM empresa LIMIT 1) RETURNING *',
-      [disponible, motivo]
-    );
-    
-    if (result.rows.length > 0) {
-      const updatedEmpresa = result.rows[0];
-      broadcast({ type: 'EMPRESA_UPDATE', data: updatedEmpresa });
-      res.json(updatedEmpresa);
-    } else {
-      res.status(404).json({ error: 'Registro de empresa no encontrado' });
+    const body = req.body || {};
+    const { disponible, motivoNoDisponible } = body;
+
+    if (typeof disponible !== 'boolean') {
+      return res
+        .status(400)
+        .json({ error: 'El campo "disponible" es obligatorio y debe ser booleano.' });
     }
+
+    const result = await pool.query(
+      `
+      UPDATE empresa
+      SET disponible = $1,
+          motivo_no_disponible = $2
+      WHERE id = (SELECT id FROM empresa ORDER BY id LIMIT 1)
+      RETURNING
+        id,
+        nombre,
+        correo,
+        telefono,
+        direccion,
+        horario,
+        info_general,
+        disponible,
+        motivo_no_disponible AS "motivoNoDisponible"
+      `,
+      [disponible, motivoNoDisponible ?? null]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Registro de empresa no encontrado' });
+    }
+
+    const updatedEmpresa = result.rows[0];
+
+    // Notificar a todos los clientes conectados
+    broadcast({ type: 'EMPRESA_UPDATE', data: updatedEmpresa });
+
+    res.json(updatedEmpresa);
   } catch (err) {
     console.error("Error actualizando disponibilidad:", err.message);
     res.status(500).json({ error: 'Error actualizando disponibilidad' });
@@ -151,7 +212,6 @@ app.post('/api/orders/:id/status', async (req, res) => {
 });
 
 // --- CATCH-ALL ROUTE ---
-// Importante: Apuntar a 'dist' en lugar de 'build'
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
