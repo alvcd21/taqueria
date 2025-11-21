@@ -1,0 +1,4 @@
+{
+  "name": "Taquería Don Juan - Dashboard",
+  "description": "Dashboard de gestión de pedidos en tiempo real para cocina y caja, integrado con PostgreSQL y automatización de voz."
+}
