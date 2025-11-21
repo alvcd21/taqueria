@@ -1,12 +1,18 @@
-const express = require('express');
-const { Pool } = require('pg');
-const cors = require('cors');
-const http = require('http');
-const WebSocket = require('ws');
-const path = require('path');
+import express from 'express';
+import pg from 'pg';
+import cors from 'cors';
+import http from 'http';
+import { WebSocketServer } from 'ws';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Necesario para __dirname en ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const { Pool } = pg;
 
 // --- CONFIGURACIÓN DE LA BASE DE DATOS (RENDER) ---
-// Usamos las credenciales exactas proporcionadas
 const pool = new Pool({
   host: "dpg-d4e9rbngi27c73cik2c0-a.virginia-postgres.render.com",
   port: 5432,
@@ -14,27 +20,25 @@ const pool = new Pool({
   user: "alvcd21",
   password: "v5kMB2R44Xh6P8d109bczIQ7sKbcYphz",
   ssl: {
-    rejectUnauthorized: false // Necesario para conectar desde fuera de Render
+    rejectUnauthorized: false
   },
-  connectionTimeoutMillis: 10000, // 10 segundos timeout
+  connectionTimeoutMillis: 10000,
 });
 
-// Manejo de errores del Pool para evitar que el servidor se caiga si se va el internet
 pool.on('error', (err, client) => {
   console.error('❌ Error inesperado en el cliente de PostgreSQL:', err);
 });
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocketServer({ server });
 
 app.use(cors());
 app.use(express.json());
 
 // --- SERVIR FRONTEND REACT (Para Producción) ---
-// Servir archivos estáticos desde la carpeta 'build' (o 'dist' dependiendo de tu bundler)
-// Asumiremos 'build' que es el estándar de create-react-app, si usas Vite suele ser 'dist'.
-app.use(express.static(path.join(__dirname, 'build')));
+// Vite genera la carpeta 'dist' por defecto
+app.use(express.static(path.join(__dirname, 'dist')));
 
 // --- VERIFICACIÓN DE CONEXIÓN AL INICIAR ---
 async function testDbConnection() {
@@ -42,11 +46,6 @@ async function testDbConnection() {
     console.log('⏳ Intentando conectar a PostgreSQL en Render...');
     const client = await pool.connect();
     console.log('✅ CONEXIÓN EXITOSA A LA BASE DE DATOS EN RENDER');
-    
-    // Verificar que existen las tablas
-    const res = await client.query("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'");
-    console.log('📊 Tablas encontradas:', res.rows.map(r => r.table_name).join(', '));
-    
     client.release();
   } catch (err) {
     console.error('❌ ERROR FATAL: No se pudo conectar a la Base de Datos.');
@@ -58,12 +57,10 @@ testDbConnection();
 
 // --- API ENDPOINTS ---
 
-// Endpoint de salud
 app.get('/api/health', (req, res) => {
   res.json({ status: 'online', db: 'connected' });
 });
 
-// 1. Obtener información de la empresa
 app.get('/api/empresa', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM empresa LIMIT 1');
@@ -78,7 +75,6 @@ app.get('/api/empresa', async (req, res) => {
   }
 });
 
-// 2. Actualizar disponibilidad
 app.post('/api/empresa/disponibilidad', async (req, res) => {
   const { disponible, motivo } = req.body;
   try {
@@ -92,7 +88,7 @@ app.post('/api/empresa/disponibilidad', async (req, res) => {
       broadcast({ type: 'EMPRESA_UPDATE', data: updatedEmpresa });
       res.json(updatedEmpresa);
     } else {
-      res.status(404).json({ error: 'Registro de empresa no encontrado para actualizar' });
+      res.status(404).json({ error: 'Registro de empresa no encontrado' });
     }
   } catch (err) {
     console.error("Error actualizando disponibilidad:", err.message);
@@ -100,7 +96,6 @@ app.post('/api/empresa/disponibilidad', async (req, res) => {
   }
 });
 
-// 3. Obtener pedidos (con items)
 app.get('/api/orders', async (req, res) => {
   try {
     const pedidosResult = await pool.query('SELECT * FROM pedidos ORDER BY fecha_hora DESC LIMIT 50');
@@ -123,7 +118,6 @@ app.get('/api/orders', async (req, res) => {
   }
 });
 
-// 4. Actualizar estado de pedido
 app.post('/api/orders/:id/status', async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -156,23 +150,22 @@ app.post('/api/orders/:id/status', async (req, res) => {
   }
 });
 
-// --- CATCH-ALL ROUTE (IMPORTANTE PARA REACT ROUTER) ---
-// Cualquier petición que no sea API, devuelve el index.html de React
+// --- CATCH-ALL ROUTE ---
+// Importante: Apuntar a 'dist' en lugar de 'build'
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'build', 'index.html'));
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-// --- LÓGICA WEBSOCKET (Tiempo Real) ---
+// --- LÓGICA WEBSOCKET ---
 
 function broadcast(message) {
   wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === 1) { // 1 = OPEN
       client.send(JSON.stringify(message));
     }
   });
 }
 
-// Polling inteligente
 let lastMaxId = 0;
 let isFirstRun = true;
 
@@ -205,13 +198,13 @@ async function checkNewOrders() {
       lastMaxId = currentMaxId;
     }
   } catch (err) {
-    // Ignorar errores transitorios
+    // Silencioso
   }
 }
 
 setInterval(checkNewOrders, 5000);
 
-const PORT = process.env.PORT || 3001; // IMPORTANTE: Usar process.env.PORT en Render
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🚀 SERVIDOR INTERMEDIO CORRIENDO EN PUERTO ${PORT}`);
 });
