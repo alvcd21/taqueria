@@ -84,9 +84,12 @@ useEffect(() => {
       setOrders(prev =>
         prev.map(o => (o.id === updatedOrder.id ? updatedOrder : o))
       );
-      if (selectedOrder && selectedOrder.id === updatedOrder.id) {
-        setSelectedOrder(updatedOrder);
-      }
+  
+      // Usamos el setter funcional para no depender de selectedOrder del closure
+      setSelectedOrder(prev =>
+        prev && prev.id === updatedOrder.id ? updatedOrder : prev
+      );
+  
       setLastUpdated(new Date());
     },
     (updatedEmpresa) => {
@@ -112,15 +115,36 @@ useEffect(() => {
 }, [fetchData]);   // 👈 sin selectedOrder
 
 
-  // Handle Status Change
-  const handleStatusChange = async (orderId: number, newStatus: OrderStatus) => {
-    try {
-      await updateOrderStatus(orderId, newStatus);
-    } catch (error) {
-      console.error("Failed to update status", error);
-      alert("Error al actualizar el estado. Verifica la conexión.");
-    }
-  };
+// Handle Status Change (actualización optimista)
+const handleStatusChange = async (orderId: number, newStatus: OrderStatus) => {
+  // 1) Actualizar la lista de pedidos en memoria
+  setOrders(prev =>
+    prev.map(o =>
+      o.id === orderId
+        ? { ...o, estado: newStatus }   // 👈 campo "estado"
+        : o
+    )
+  );
+
+  // 2) Actualizar también el pedido que está abierto en el modal
+  setSelectedOrder(prev =>
+    prev && prev.id === orderId
+      ? { ...prev, estado: newStatus } // 👈 igual
+      : prev
+  );
+
+  setLastUpdated(new Date());
+
+  // 3) Guardar en la BD
+  try {
+    await updateOrderStatus(orderId, newStatus);
+  } catch (error) {
+    console.error("Failed to update status", error);
+    alert("Error al actualizar el estado. Verifica la conexión.");
+    // Si quisieras, aquí podrías revertir el cambio local
+  }
+};
+
 
   // Handle Availability Toggle
   const toggleAvailability = async () => {
