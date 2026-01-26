@@ -14,7 +14,7 @@ const { Pool } = pg;
 
 // --- CONFIGURACIÓN DE LA BASE DE DATOS (RENDER) ---
 const pool = new Pool({
-  host: "dpg-d4e9rbngi27c73cik2c0-a.virginia-postgres.render.com",
+  host: "dpg-d4hacb9r0fns73a46ugg-a.virginia-postgres.render.com",
   port: 5432,
   database: "taqueria_don_juan",
   user: "alvcd21",
