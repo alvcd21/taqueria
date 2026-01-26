@@ -18,7 +18,7 @@ const pool = new Pool({
   port: 5432,
   database: "taqueria_don_juan",
   user: "alvcd21",
-  password: "v5kMB2R44Xh6P8d109bczIQ7sKbcYphz",
+  password: "5LrGfnHK5EPdM4KtKz6T7fHUWHYJbc5N",
   ssl: {
     rejectUnauthorized: false
   },
